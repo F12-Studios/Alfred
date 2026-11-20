@@ -131,25 +131,33 @@ object AiAssistantHandler {
                     .post(requestBody)
                     .build()
 
-                httpClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val bodyString = response.body?.string() ?: return null
-                        val json = JSONObject(bodyString)
-                        val candidates = json.optJSONArray("candidates")
-                        if (candidates != null && candidates.length() > 0) {
-                            val firstCandidate = candidates.getJSONObject(0)
-                            val content = firstCandidate.optJSONObject("content")
-                            val parts = content?.optJSONArray("parts")
-                            if (parts != null && parts.length() > 0) {
-                                val text = parts.getJSONObject(0).optString("text")
-                                if (text.isNotBlank()) {
-                                    return sanitizeForSpeech(text)
+                var parsedResult: String? = null
+                val response = httpClient.newCall(request).execute()
+                response.use { resp ->
+                    if (resp.isSuccessful) {
+                        val bodyString = resp.body?.string()
+                        if (!bodyString.isNullOrBlank()) {
+                            val json = JSONObject(bodyString)
+                            val candidates = json.optJSONArray("candidates")
+                            if (candidates != null && candidates.length() > 0) {
+                                val firstCandidate = candidates.getJSONObject(0)
+                                val content = firstCandidate.optJSONObject("content")
+                                val parts = content?.optJSONArray("parts")
+                                if (parts != null && parts.length() > 0) {
+                                    val text = parts.getJSONObject(0).optString("text")
+                                    if (text.isNotBlank()) {
+                                        parsedResult = sanitizeForSpeech(text)
+                                    }
                                 }
                             }
                         }
                     } else {
-                        Log.w(TAG, "Gemini call to $model failed with code ${response.code}: ${response.message}")
+                        Log.w(TAG, "Gemini call to $model failed with code ${resp.code}: ${resp.message}")
                     }
+                }
+
+                if (parsedResult != null) {
+                    return parsedResult
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error querying Gemini model $model", e)
@@ -173,17 +181,21 @@ object AiAssistantHandler {
                 .get()
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: return null
-                    val json = JSONObject(body)
-                    val extract = json.optString("extract")
-                    if (extract.isNotBlank() && !extract.contains("may refer to:")) {
-                        return limitSentences(extract, 2)
+            var resultText: String? = null
+            val response = httpClient.newCall(request).execute()
+            response.use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val json = JSONObject(body)
+                        val extract = json.optString("extract")
+                        if (extract.isNotBlank() && !extract.contains("may refer to:")) {
+                            resultText = limitSentences(extract, 2)
+                        }
                     }
                 }
-                null
             }
+            resultText
         } catch (e: Exception) {
             Log.d(TAG, "Wikipedia summary lookup failed", e)
             null
@@ -204,21 +216,26 @@ object AiAssistantHandler {
                 .get()
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: return null
-                    val json = JSONObject(body)
-                    val abstractText = json.optString("AbstractText")
-                    if (abstractText.isNotBlank()) {
-                        return limitSentences(abstractText, 2)
-                    }
-                    val answer = json.optString("Answer")
-                    if (answer.isNotBlank()) {
-                        return sanitizeForSpeech(answer)
+            var resultText: String? = null
+            val response = httpClient.newCall(request).execute()
+            response.use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val json = JSONObject(body)
+                        val abstractText = json.optString("AbstractText")
+                        if (abstractText.isNotBlank()) {
+                            resultText = limitSentences(abstractText, 2)
+                        } else {
+                            val answer = json.optString("Answer")
+                            if (answer.isNotBlank()) {
+                                resultText = sanitizeForSpeech(answer)
+                            }
+                        }
                     }
                 }
-                null
             }
+            resultText
         } catch (e: Exception) {
             Log.d(TAG, "DuckDuckGo instant answer lookup failed", e)
             null
