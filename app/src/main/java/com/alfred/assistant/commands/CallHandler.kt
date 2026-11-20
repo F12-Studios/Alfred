@@ -22,22 +22,24 @@ object CallHandler {
      * @return A butler-style response string.
      */
     fun call(context: Context, contactName: String): String {
-        val phoneNumber = ContactResolver.resolve(context, contactName)
+        val contactMatch = ContactResolver.resolveContact(context, contactName)
 
-        return if (phoneNumber != null) {
+        return if (contactMatch != null) {
+            val resolvedName = contactMatch.name
+            val phoneNumber = contactMatch.phoneNumber
             try {
                 val callIntent = Intent(Intent.ACTION_CALL).apply {
                     data = Uri.parse("tel:$phoneNumber")
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(callIntent)
-                "Placing a call to $contactName right away, sir."
+                "Placing a call to $resolvedName right away, sir."
             } catch (e: SecurityException) {
                 // Permission not granted — fall back to dialer
                 openDialer(context, phoneNumber)
-                "Opening the dialer for $contactName, sir. It appears I lack the permission to call directly."
+                "Opening the dialer for $resolvedName, sir. It appears I lack permission to call directly."
             } catch (e: Exception) {
-                "I'm terribly sorry, sir. I encountered an issue while trying to call $contactName: ${e.message}"
+                "I'm terribly sorry, sir. I encountered an issue while trying to call $resolvedName: ${e.message}"
             }
         } else {
             // Contact not found — try to open dialer with the raw input

@@ -170,11 +170,56 @@ object AiAssistantHandler {
 
     /**
      * Queries Wikipedia REST API for concise page summary.
+     * Uses OpenSearch fallback if direct summary is not found.
      */
     private fun queryWikipedia(query: String): String? {
         return try {
             val terms = extractSearchTerms(query)
-            val encodedTopic = Uri.encode(terms.replace(" ", "_"))
+            if (terms.isBlank()) return null
+
+            // 1. Try direct summary
+            val directAnswer = fetchWikiSummary(terms.replace(" ", "_"))
+            if (directAnswer != null) return directAnswer
+
+            // 2. OpenSearch fallback to resolve closest Wikipedia page title
+            val searchUrl = "https://en.wikipedia.org/w/api.php?action=opensearch&search=${Uri.encode(terms)}&limit=1&namespace=0&format=json"
+            val searchReq = Request.Builder()
+                .url(searchUrl)
+                .header("User-Agent", "AlfredVoiceAssistant/1.0 (Android; contact@alfred.assistant)")
+                .get()
+                .build()
+
+            var matchedTitle: String? = null
+            val searchResp = httpClient.newCall(searchReq).execute()
+            try {
+                if (searchResp.isSuccessful) {
+                    val body = searchResp.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        val arr = JSONArray(body)
+                        val titles = arr.optJSONArray(1)
+                        if (titles != null && titles.length() > 0) {
+                            matchedTitle = titles.optString(0)
+                        }
+                    }
+                }
+            } finally {
+                searchResp.close()
+            }
+
+            if (!matchedTitle.isNullOrBlank()) {
+                fetchWikiSummary(matchedTitle.replace(" ", "_"))
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Wikipedia summary lookup failed", e)
+            null
+        }
+    }
+
+    private fun fetchWikiSummary(topic: String): String? {
+        return try {
+            val encodedTopic = Uri.encode(topic)
             val url = "https://en.wikipedia.org/api/rest_v1/page/summary/$encodedTopic"
 
             val request = Request.Builder()
@@ -192,7 +237,7 @@ object AiAssistantHandler {
                         val json = JSONObject(body)
                         val extract = json.optString("extract")
                         if (extract.isNotBlank() && !extract.contains("may refer to:")) {
-                            resultText = limitSentences(extract, 2)
+                            resultText = sanitizeForSpeech(limitSentences(extract, 2))
                         }
                     }
                 }
@@ -200,8 +245,7 @@ object AiAssistantHandler {
                 response.close()
             }
             resultText
-        } catch (e: Exception) {
-            Log.d(TAG, "Wikipedia summary lookup failed", e)
+        } catch (_: Exception) {
             null
         }
     }
@@ -229,11 +273,25 @@ object AiAssistantHandler {
                         val json = JSONObject(body)
                         val abstractText = json.optString("AbstractText")
                         if (abstractText.isNotBlank()) {
-                            resultText = limitSentences(abstractText, 2)
+                            resultText = sanitizeForSpeech(limitSentences(abstractText, 2))
                         } else {
                             val answer = json.optString("Answer")
                             if (answer.isNotBlank()) {
                                 resultText = sanitizeForSpeech(answer)
+                            } else {
+                                val definition = json.optString("Definition")
+                                if (definition.isNotBlank()) {
+                                    resultText = sanitizeForSpeech(definition)
+                                } else {
+                                    val related = json.optJSONArray("RelatedTopics")
+                                    if (related != null && related.length() > 0) {
+                                        val firstTopic = related.optJSONObject(0)
+                                        val firstText = firstTopic?.optString("Text")
+                                        if (!firstText.isNullOrBlank()) {
+                                            resultText = sanitizeForSpeech(limitSentences(firstText, 2))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

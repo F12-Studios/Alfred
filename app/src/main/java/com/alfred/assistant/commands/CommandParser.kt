@@ -2,25 +2,38 @@ package com.alfred.assistant.commands
 
 /**
  * Parses raw spoken text into a structured [ParsedCommand].
- * Uses keyword matching with flexibility for natural language variations.
+ * Handles natural language variations with flexible regex and token matching.
  */
 object CommandParser {
 
     /**
      * Parses the given spoken [text] and returns the corresponding [ParsedCommand].
-     * The input is normalized to lowercase and trimmed before matching.
      */
     fun parse(text: String): ParsedCommand {
-        val input = text.trim().lowercase()
+        var input = text.trim().lowercase()
+
+        // Clean out conversational filler and wake word remnants
+        val stripPrefixes = listOf(
+            "hey alfred,", "hey alfred", "alfred,", "alfred",
+            "please alfred", "please ", "can you ", "could you ", "will you "
+        )
+        for (p in stripPrefixes) {
+            if (input.startsWith(p)) {
+                input = input.removePrefix(p).trim().removePrefix(",").trim()
+            }
+        }
 
         return when {
-            // --- Selfie (check before generic "open camera") ---
+            // --- Selfie ---
             matchesSelfie(input) -> ParsedCommand.TakeSelfie
 
-            // --- YouTube search (must be checked before generic "open" and "search") ---
+            // --- WhatsApp (must check before generic open/message) ---
+            matchesWhatsApp(input) -> parseWhatsApp(input)
+
+            // --- YouTube search ---
             matchesYouTubeSearch(input) -> parseYouTubeSearch(input)
 
-            // --- Send message ---
+            // --- Send SMS / General Message ---
             matchesSendMessage(input) -> parseSendMessage(input)
 
             // --- Call contact ---
@@ -47,12 +60,127 @@ object CommandParser {
             // --- Battery status ---
             matchesBatteryStatus(input) -> ParsedCommand.BatteryStatus
 
-            // --- Explicit Web search (e.g., "search the web for...") ---
+            // --- Explicit Web search ---
             matchesExplicitWebSearch(input) -> parseWebSearch(input)
 
-            // --- AI Question / Conversational Assistant (Gemini / Siri style) ---
-            else -> ParsedCommand.AskAi(text)
+            // --- Conversational Assistant (Gemini / Siri style) ---
+            else -> ParsedCommand.AskAi(text.trim())
         }
+    }
+
+    // ── WhatsApp ────────────────────────────────────────────────────────────
+
+    private fun matchesWhatsApp(input: String): Boolean {
+        return input.contains("whatsapp")
+    }
+
+    private fun parseWhatsApp(input: String): ParsedCommand {
+        // Direct app launch check: "open whatsapp", "launch whatsapp"
+        if (input in listOf("open whatsapp", "launch whatsapp", "start whatsapp", "whatsapp")) {
+            return ParsedCommand.OpenApp("whatsapp")
+        }
+
+        val patterns = listOf(
+            // "message Shriraj on whatsapp that he is noob"
+            // "send message to Shriraj on whatsapp saying he is noob"
+            // "send a message to Shriraj on whatsapp that he is noob"
+            Regex("""^(?:send\s+(?:a\s+)?(?:text\s+|message\s+)?to\s+|message\s+|text\s+)?(.+?)\s+on\s+whatsapp\s+(?:that|saying|with\s+message|with\s+the\s+message|message)\s+(.+)$"""),
+
+            // "message Shriraj on whatsapp he is noob"
+            Regex("""^(?:send\s+(?:a\s+)?(?:text\s+|message\s+)?to\s+|message\s+|text\s+)?(.+?)\s+on\s+whatsapp\s+(.+)$"""),
+
+            // "send a whatsapp to Shriraj that he is noob"
+            // "send whatsapp message to Shriraj saying he is noob"
+            // "whatsapp Shriraj that he is noob"
+            Regex("""^(?:send\s+(?:a\s+)?whatsapp\s+(?:message\s+)?to\s+|whatsapp\s+)(.+?)\s+(?:that|saying|with\s+message|message)\s+(.+)$"""),
+
+            // "whatsapp Shriraj he is noob"
+            Regex("""^whatsapp\s+(.+?)\s+(.+)$""")
+        )
+
+        for (pattern in patterns) {
+            val match = pattern.find(input)
+            if (match != null) {
+                val contact = match.groupValues[1].trim()
+                val message = match.groupValues[2].trim()
+                return ParsedCommand.SendWhatsApp(contact, message)
+            }
+        }
+
+        // Fallback for WhatsApp query: extract recipient if possible
+        val afterWhatsapp = input.substringAfter("whatsapp").trim()
+        return if (afterWhatsapp.isNotBlank()) {
+            ParsedCommand.SendWhatsApp(afterWhatsapp, "")
+        } else {
+            ParsedCommand.OpenApp("whatsapp")
+        }
+    }
+
+    // ── Send SMS / General Message ──────────────────────────────────────────
+
+    private fun matchesSendMessage(input: String): Boolean {
+        val prefixes = listOf(
+            "send message to", "send a message to", "send text to",
+            "send a text to", "text to", "message to", "sms to",
+            "send sms to", "send a sms to", "send message", "send text",
+            "message ", "text "
+        )
+        return prefixes.any { input.startsWith(it) } &&
+                (input.contains(" that ") || input.contains(" saying ") || input.contains(" to "))
+    }
+
+    private fun parseSendMessage(input: String): ParsedCommand {
+        val patterns = listOf(
+            // "message Shriraj that he is noob"
+            // "send message to Shriraj saying hello"
+            Regex("""^(?:send\s+(?:a\s+)?(?:text\s+|message\s+)?to\s+|message\s+|text\s+)(.+?)\s+(?:that|saying|with\s+message|with\s+the\s+message)\s+(.+)$"""),
+
+            // "send text to Shriraj hello"
+            Regex("""^(?:send\s+(?:a\s+)?(?:text|sms|message)\s+to\s+|text\s+to\s+|message\s+to\s+)(.+?)\s+(.+)$""")
+        )
+
+        for (pattern in patterns) {
+            val match = pattern.find(input)
+            if (match != null) {
+                val contact = match.groupValues[1].trim()
+                val message = match.groupValues[2].trim()
+                return ParsedCommand.SendMessage(contact, message)
+            }
+        }
+
+        // Fallback
+        val words = input.split("\\s+".toRegex()).filter { it.isNotBlank() }
+        return if (words.size >= 3) {
+            val contact = words[words.size - 2]
+            val message = words.last()
+            ParsedCommand.SendMessage(contact, message)
+        } else {
+            ParsedCommand.SendMessage(input, "")
+        }
+    }
+
+    // ── Open app ────────────────────────────────────────────────────────────
+
+    private fun matchesOpenApp(input: String): Boolean {
+        // Exclude music phrases
+        if (matchesPlayMusic(input)) return false
+
+        val prefixes = listOf(
+            "open ", "launch ", "start ", "run ", "go to ", "play "
+        )
+        return prefixes.any { input.startsWith(it) }
+    }
+
+    private fun parseOpenApp(input: String): ParsedCommand {
+        val prefixes = listOf(
+            "open ", "launch ", "start ", "run ", "go to ", "play "
+        )
+        for (prefix in prefixes) {
+            if (input.startsWith(prefix)) {
+                return ParsedCommand.OpenApp(input.removePrefix(prefix).trim())
+            }
+        }
+        return ParsedCommand.OpenApp(input.substringAfter(" ").trim())
     }
 
     // ── Selfie ──────────────────────────────────────────────────────────────
@@ -75,7 +203,6 @@ object CommandParser {
     }
 
     private fun parseYouTubeSearch(input: String): ParsedCommand {
-        // Patterns: "open youtube and search for X", "youtube search X", "search youtube for X"
         val patterns = listOf(
             Regex("""(?:open\s+)?youtube\s+(?:and\s+)?search\s+(?:for\s+)?(.+)"""),
             Regex("""search\s+(?:on\s+)?youtube\s+(?:for\s+)?(.+)"""),
@@ -88,57 +215,6 @@ object CommandParser {
             }
         }
         return ParsedCommand.SearchYouTube(input.substringAfter("search").trim())
-    }
-
-    // ── Send message ────────────────────────────────────────────────────────
-
-    private fun matchesSendMessage(input: String): Boolean {
-        val prefixes = listOf(
-            "send message to", "send a message to", "send text to",
-            "send a text to", "text to", "message to", "sms to",
-            "send sms to", "send a sms to"
-        )
-        return prefixes.any { input.startsWith(it) }
-    }
-
-    private fun parseSendMessage(input: String): ParsedCommand {
-        // Pattern: "send message to [contact] [message]"
-        // We need to split contact from message. Heuristic: look for common separators
-        val prefixes = listOf(
-            "send a message to", "send message to", "send a text to",
-            "send text to", "send a sms to", "send sms to",
-            "text to", "message to", "sms to"
-        )
-        var remaining = input
-        for (prefix in prefixes) {
-            if (input.startsWith(prefix)) {
-                remaining = input.removePrefix(prefix).trim()
-                break
-            }
-        }
-
-        // Try to split on common delimiters: "saying", "that", "with message"
-        val delimiters = listOf(" saying ", " that ", " with message ", " message ")
-        for (delimiter in delimiters) {
-            val idx = remaining.indexOf(delimiter)
-            if (idx > 0) {
-                val contact = remaining.substring(0, idx).trim()
-                val message = remaining.substring(idx + delimiter.length).trim()
-                return ParsedCommand.SendMessage(contact, message)
-            }
-        }
-
-        // Fallback: first word(s) up to a natural break
-        // If no delimiter found, assume everything after the first couple of words is the message
-        val words = remaining.split(" ")
-        return if (words.size >= 2) {
-            // Try to guess: contact is usually 1–2 words, rest is message
-            val contact = words.take(1).joinToString(" ")
-            val message = words.drop(1).joinToString(" ")
-            ParsedCommand.SendMessage(contact, message)
-        } else {
-            ParsedCommand.SendMessage(remaining, "")
-        }
     }
 
     // ── Call contact ────────────────────────────────────────────────────────
@@ -162,27 +238,6 @@ object CommandParser {
             }
         }
         return ParsedCommand.CallContact(input.substringAfter(" ").trim())
-    }
-
-    // ── Open app ────────────────────────────────────────────────────────────
-
-    private fun matchesOpenApp(input: String): Boolean {
-        val prefixes = listOf(
-            "open ", "launch ", "start ", "run ", "go to "
-        )
-        return prefixes.any { input.startsWith(it) }
-    }
-
-    private fun parseOpenApp(input: String): ParsedCommand {
-        val prefixes = listOf(
-            "open ", "launch ", "start ", "run ", "go to "
-        )
-        for (prefix in prefixes) {
-            if (input.startsWith(prefix)) {
-                return ParsedCommand.OpenApp(input.removePrefix(prefix).trim())
-            }
-        }
-        return ParsedCommand.OpenApp(input.substringAfter(" ").trim())
     }
 
     // ── Web search (explicit) ───────────────────────────────────────────────
@@ -226,9 +281,6 @@ object CommandParser {
     }
 
     private fun parseSetAlarm(input: String): ParsedCommand {
-        // Try to extract time from various formats
-
-        // Pattern: "7:30 am", "7:30am", "7 30 am"
         val timeWithColon = Regex("""(\d{1,2})[:\s](\d{2})\s*(am|pm|a\.m\.|p\.m\.)?""")
         val matchColon = timeWithColon.find(input)
         if (matchColon != null) {
@@ -242,7 +294,6 @@ object CommandParser {
             return ParsedCommand.SetAlarm(hour, minute)
         }
 
-        // Pattern: "7 am", "7am", "7 pm"
         val hourOnly = Regex("""(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)""")
         val matchHour = hourOnly.find(input)
         if (matchHour != null) {
@@ -255,7 +306,6 @@ object CommandParser {
             return ParsedCommand.SetAlarm(hour, 0)
         }
 
-        // Pattern: just a number like "set alarm 7"
         val justNumber = Regex("""(\d{1,2})""")
         val matchNumber = justNumber.find(input)
         if (matchNumber != null) {
@@ -263,7 +313,6 @@ object CommandParser {
             return ParsedCommand.SetAlarm(hour, 0)
         }
 
-        // Default: 7:00 AM
         return ParsedCommand.SetAlarm(7, 0)
     }
 
@@ -318,45 +367,19 @@ object CommandParser {
  * Sealed class hierarchy representing all commands Alfred can understand.
  */
 sealed class ParsedCommand {
-    /** Call a contact by name. */
     data class CallContact(val contactName: String) : ParsedCommand()
-
-    /** Open an installed app by name. */
     data class OpenApp(val appName: String) : ParsedCommand()
-
-    /** Open YouTube and search for a query. */
     data class SearchYouTube(val query: String) : ParsedCommand()
-
-    /** Perform a web search. */
     data class WebSearch(val query: String) : ParsedCommand()
-
-    /** Take a selfie with the front camera. */
     data object TakeSelfie : ParsedCommand()
-
-    /** Send a message to a contact. */
+    data class SendWhatsApp(val contact: String, val message: String) : ParsedCommand()
     data class SendMessage(val contact: String, val message: String) : ParsedCommand()
-
-    /** Play music on the default music player. */
     data object PlayMusic : ParsedCommand()
-
-    /** Set an alarm for the given time. */
     data class SetAlarm(val hour: Int, val minute: Int) : ParsedCommand()
-
-    /** Toggle the flashlight on or off. */
     data class Flashlight(val turnOn: Boolean) : ParsedCommand()
-
-    /** Check the current time. */
     data object CheckTime : ParsedCommand()
-
-    /** Check the current date. */
     data object CheckDate : ParsedCommand()
-
-    /** Check the battery level. */
     data object BatteryStatus : ParsedCommand()
-
-    /** Ask general knowledge or conversational question to AI (like Gemini / Siri). */
     data class AskAi(val question: String) : ParsedCommand()
-
-    /** Unrecognized command. */
     data class Unknown(val rawText: String) : ParsedCommand()
 }

@@ -3,157 +3,229 @@ package com.alfred.assistant.commands
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
+import android.util.Log
 
 /**
- * Handles launching installed applications by name.
- * Uses a hardcoded map for common apps and falls back to fuzzy matching
- * against installed app labels.
+ * Handles launching installed applications dynamically by name.
+ * Uses queryIntentActivities (Android launcher category) and getInstalledApplications
+ * with intelligent token and fuzzy matching.
  */
 object AppLaunchHandler {
 
-    /**
-     * Map of common app names (lowercase) to their package names.
-     */
-    private val KNOWN_APPS = mapOf(
-        "youtube" to "com.google.android.youtube",
-        "whatsapp" to "com.whatsapp",
-        "instagram" to "com.instagram.android",
-        "spotify" to "com.spotify.music",
-        "chrome" to "com.android.chrome",
-        "gmail" to "com.google.android.gm",
-        "maps" to "com.google.android.apps.maps",
-        "google maps" to "com.google.android.apps.maps",
-        "camera" to "com.android.camera2",
-        "settings" to "com.android.settings",
-        "calculator" to "com.google.android.calculator",
-        "clock" to "com.google.android.deskclock",
-        "calendar" to "com.google.android.calendar",
-        "messages" to "com.google.android.apps.messaging",
-        "phone" to "com.google.android.dialer",
-        "dialer" to "com.google.android.dialer",
-        "photos" to "com.google.android.apps.photos",
-        "google photos" to "com.google.android.apps.photos",
-        "twitter" to "com.twitter.android",
-        "x" to "com.twitter.android",
-        "facebook" to "com.facebook.katana",
-        "telegram" to "org.telegram.messenger",
-        "snapchat" to "com.snapchat.android",
-        "netflix" to "com.netflix.mediaclient",
-        "amazon" to "com.amazon.mShop.android.shopping",
-        "amazon shopping" to "com.amazon.mShop.android.shopping",
-        "google" to "com.google.android.googlequicksearchbox",
-        "play store" to "com.android.vending",
-        "google play" to "com.android.vending",
-        "files" to "com.google.android.apps.nbu.files",
-        "drive" to "com.google.android.apps.docs",
-        "google drive" to "com.google.android.apps.docs",
-        "keep" to "com.google.android.keep",
-        "notes" to "com.google.android.keep",
-        "contacts" to "com.google.android.contacts",
-        "meet" to "com.google.android.apps.meetings",
-        "google meet" to "com.google.android.apps.meetings",
-        "zoom" to "us.zoom.videomeetings",
-        "teams" to "com.microsoft.teams",
-        "discord" to "com.discord",
-        "reddit" to "com.reddit.frontpage",
-        "linkedin" to "com.linkedin.android",
-        "pinterest" to "com.pinterest",
-        "tiktok" to "com.zhiliaoapp.musically",
-        "uber" to "com.ubercab",
-        "lyft" to "me.lyft.android"
+    private const val TAG = "AppLaunchHandler"
+
+    private data class AppCandidate(
+        val label: String,
+        val packageName: String,
+        val cleanLabel: String,
+        val words: List<String>
+    )
+
+    // Common abbreviations and aliases
+    private val ALIASES = mapOf(
+        "whatsapp" to listOf("com.whatsapp", "com.whatsapp.w4b"),
+        "duolingo" to listOf("com.duolingo"),
+        "chess" to listOf("com.chess", "jwtc.android.chess"),
+        "yt" to listOf("com.google.android.youtube"),
+        "youtube" to listOf("com.google.android.youtube"),
+        "insta" to listOf("com.instagram.android"),
+        "instagram" to listOf("com.instagram.android"),
+        "fb" to listOf("com.facebook.katana"),
+        "facebook" to listOf("com.facebook.katana"),
+        "spotify" to listOf("com.spotify.music"),
+        "chrome" to listOf("com.android.chrome"),
+        "gmail" to listOf("com.google.android.gm"),
+        "maps" to listOf("com.google.android.apps.maps"),
+        "camera" to listOf("com.android.camera2", "com.google.android.GoogleCamera"),
+        "settings" to listOf("com.android.settings"),
+        "calculator" to listOf("com.google.android.calculator"),
+        "clock" to listOf("com.google.android.deskclock"),
+        "calendar" to listOf("com.google.android.calendar"),
+        "messages" to listOf("com.google.android.apps.messaging"),
+        "phone" to listOf("com.google.android.dialer"),
+        "photos" to listOf("com.google.android.apps.photos"),
+        "twitter" to listOf("com.twitter.android"),
+        "x" to listOf("com.twitter.android"),
+        "telegram" to listOf("org.telegram.messenger"),
+        "snapchat" to listOf("com.snapchat.android"),
+        "netflix" to listOf("com.netflix.mediaclient"),
+        "amazon" to listOf("com.amazon.mShop.android.shopping"),
+        "play store" to listOf("com.android.vending")
     )
 
     /**
-     * Attempts to launch the app matching the given [appName].
-     *
-     * 1. Checks the [KNOWN_APPS] map first.
-     * 2. Falls back to fuzzy matching against installed app labels.
-     *
-     * @return A butler-style response string.
+     * Attempts to find and launch an installed app matching [appName].
      */
     fun launch(context: Context, appName: String): String {
-        val normalizedName = appName.lowercase().trim()
-
-        // 1. Check known apps map
-        val knownPackage = KNOWN_APPS[normalizedName]
-        if (knownPackage != null) {
-            return launchPackage(context, knownPackage, appName)
+        val query = cleanSearchQuery(appName)
+        if (query.isBlank()) {
+            return "Which app would you like me to open, sir?"
         }
 
-        // 2. Try exact substring match in known apps keys
-        val partialMatch = KNOWN_APPS.entries.find { (key, _) ->
-            key.contains(normalizedName) || normalizedName.contains(key)
-        }
-        if (partialMatch != null) {
-            return launchPackage(context, partialMatch.value, appName)
+        val pm = context.packageManager
+
+        // 1. Check known aliases first for lightning fast response
+        val aliasPackages = ALIASES[query]
+        if (aliasPackages != null) {
+            for (pkg in aliasPackages) {
+                val intent = pm.getLaunchIntentForPackage(pkg)
+                if (intent != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                    val label = try {
+                        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                    } catch (_: Exception) {
+                        appName
+                    }
+                    return "Opening $label for you, sir."
+                }
+            }
         }
 
-        // 3. Fuzzy match against installed app labels
-        val matchedPackage = fuzzyMatchInstalledApp(context, normalizedName)
-        if (matchedPackage != null) {
-            return launchPackage(context, matchedPackage, appName)
+        // 2. Dynamically collect all installed apps from the device
+        val candidates = collectInstalledApps(pm)
+        if (candidates.isEmpty()) {
+            Log.w(TAG, "No launchable apps discovered by PackageManager")
+        }
+
+        // 3. Score all candidates against user query
+        var bestApp: AppCandidate? = null
+        var highestScore = -1
+
+        val cleanQuery = query.replace(Regex("[^a-z0-9]"), "")
+        val queryWords = query.split(Regex("\\s+")).filter { it.isNotBlank() }
+
+        for (candidate in candidates) {
+            val score = calculateMatchScore(candidate, query, cleanQuery, queryWords)
+            if (score > highestScore) {
+                highestScore = score
+                bestApp = candidate
+            }
+        }
+
+        if (bestApp != null && highestScore >= 50) {
+            return try {
+                val launchIntent = pm.getLaunchIntentForPackage(bestApp.packageName)
+                if (launchIntent != null) {
+                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(launchIntent)
+                    Log.d(TAG, "Launched '${bestApp.label}' (${bestApp.packageName}) with score $highestScore")
+                    "Opening ${bestApp.label} for you, sir."
+                } else {
+                    "I located ${bestApp.label}, sir, but it cannot be opened directly."
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error launching package ${bestApp.packageName}", e)
+                "I encountered a difficulty opening ${bestApp.label}, sir: ${e.message}"
+            }
         }
 
         return "I'm afraid I couldn't find an app called \"$appName\" on this device, sir."
     }
 
     /**
-     * Launches the app identified by [packageName].
+     * Cleans up common prefixes and suffixes in user queries.
      */
-    private fun launchPackage(context: Context, packageName: String, appName: String): String {
-        return try {
-            val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
-            if (launchIntent != null) {
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(launchIntent)
-                "Opening $appName for you, sir."
-            } else {
-                "I found $appName, sir, but it doesn't appear to have a launchable activity."
+    private fun cleanSearchQuery(raw: String): String {
+        var q = raw.lowercase().trim()
+        val removePrefixes = listOf("the ", "my ")
+        for (p in removePrefixes) {
+            if (q.startsWith(p)) {
+                q = q.removePrefix(p).trim()
             }
-        } catch (e: Exception) {
-            "I encountered a difficulty while trying to open $appName, sir: ${e.message}"
         }
+        val removeSuffixes = listOf(" app", " application", " game")
+        for (s in removeSuffixes) {
+            if (q.endsWith(s)) {
+                q = q.removeSuffix(s).trim()
+            }
+        }
+        return q.trim()
+    }
+
+    private fun calculateMatchScore(
+        app: AppCandidate,
+        query: String,
+        cleanQuery: String,
+        queryWords: List<String>
+    ): Int {
+        val lowerLabel = app.label.lowercase()
+        val cleanLabel = app.cleanLabel
+        val lowerPkg = app.packageName.lowercase()
+
+        // Exact match
+        if (lowerLabel == query || cleanLabel == cleanQuery) {
+            return 100
+        }
+
+        // App starts with query (e.g. "chess" matches "Chess - Play & Learn")
+        if (lowerLabel.startsWith(query) || cleanLabel.startsWith(cleanQuery)) {
+            return 95
+        }
+
+        // Exact word match (e.g. query "duolingo" in ["duolingo", "language", "lessons"])
+        if (app.words.any { it == query } || queryWords.any { qWord -> app.words.contains(qWord) }) {
+            return 85
+        }
+
+        // Any word in label starts with query
+        if (app.words.any { it.startsWith(query) }) {
+            return 80
+        }
+
+        // Label contains query substring
+        if (lowerLabel.contains(query) || cleanLabel.contains(cleanQuery)) {
+            return 70
+        }
+
+        // Package name contains query (e.g. "com.chess" contains "chess", "com.duolingo" contains "duolingo")
+        if (lowerPkg.contains(query) || lowerPkg.contains(cleanQuery)) {
+            return 60
+        }
+
+        return 0
     }
 
     /**
-     * Searches installed apps for one whose label matches the given [name].
-     * Uses case-insensitive contains matching, with preference for exact matches.
-     *
-     * @return The package name of the best match, or null if none found.
+     * Collects all launchable apps dynamically on the device.
      */
-    private fun fuzzyMatchInstalledApp(context: Context, name: String): String? {
-        val pm = context.packageManager
-        val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+    private fun collectInstalledApps(pm: PackageManager): List<AppCandidate> {
+        val appMap = mutableMapOf<String, AppCandidate>()
 
-        // First pass: exact label match (case-insensitive)
-        for (appInfo in installedApps) {
-            val label = pm.getApplicationLabel(appInfo).toString().lowercase()
-            if (label == name) {
-                return appInfo.packageName
+        // 1. Query launcher intent activities (this gives standard user-facing apps)
+        val launcherIntent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+        val resolveList: List<ResolveInfo> = pm.queryIntentActivities(launcherIntent, 0)
+        for (resolve in resolveList) {
+            val pkg = resolve.activityInfo.packageName
+            val label = resolve.loadLabel(pm).toString().trim()
+            if (label.isNotBlank() && !appMap.containsKey(pkg)) {
+                val clean = label.lowercase().replace(Regex("[^a-z0-9]"), "")
+                val words = label.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
+                appMap[pkg] = AppCandidate(label, pkg, clean, words)
             }
         }
 
-        // Second pass: label contains the search name
-        for (appInfo in installedApps) {
-            val label = pm.getApplicationLabel(appInfo).toString().lowercase()
-            if (label.contains(name)) {
-                // Verify it has a launch intent
-                if (pm.getLaunchIntentForPackage(appInfo.packageName) != null) {
-                    return appInfo.packageName
+        // 2. Query all installed applications to catch any missed
+        try {
+            val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            for (appInfo in installedApps) {
+                val pkg = appInfo.packageName
+                if (!appMap.containsKey(pkg) && pm.getLaunchIntentForPackage(pkg) != null) {
+                    val label = pm.getApplicationLabel(appInfo).toString().trim()
+                    if (label.isNotBlank()) {
+                        val clean = label.lowercase().replace(Regex("[^a-z0-9]"), "")
+                        val words = label.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotBlank() }
+                        appMap[pkg] = AppCandidate(label, pkg, clean, words)
+                    }
                 }
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error querying installed applications", e)
         }
 
-        // Third pass: search name contains the label (for short labels)
-        for (appInfo in installedApps) {
-            val label = pm.getApplicationLabel(appInfo).toString().lowercase()
-            if (label.length >= 3 && name.contains(label)) {
-                if (pm.getLaunchIntentForPackage(appInfo.packageName) != null) {
-                    return appInfo.packageName
-                }
-            }
-        }
-
-        return null
+        return appMap.values.toList()
     }
 }

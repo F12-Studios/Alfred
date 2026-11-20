@@ -1,6 +1,9 @@
 package com.alfred.assistant.commands
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import com.alfred.assistant.contacts.ContactResolver
 
 /**
  * Routes a [ParsedCommand] to the appropriate handler and returns
@@ -32,6 +35,10 @@ object CommandExecutor {
 
             is ParsedCommand.TakeSelfie -> {
                 CameraHandler.takeSelfie(context)
+            }
+
+            is ParsedCommand.SendWhatsApp -> {
+                WhatsAppHandler.sendMessage(context, command.contact, command.message)
             }
 
             is ParsedCommand.SendMessage -> {
@@ -79,32 +86,32 @@ object CommandExecutor {
 object MessageHandler {
 
     fun sendMessage(context: Context, contact: String, message: String): String {
-        val phoneNumber = com.alfred.assistant.contacts.ContactResolver.resolve(context, contact)
+        val contactMatch = ContactResolver.resolveContact(context, contact)
 
-        return if (phoneNumber != null) {
+        return if (contactMatch != null) {
             try {
-                val smsUri = android.net.Uri.parse("smsto:$phoneNumber")
-                val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO, smsUri).apply {
+                val smsUri = Uri.parse("smsto:${contactMatch.phoneNumber}")
+                val intent = Intent(Intent.ACTION_SENDTO, smsUri).apply {
                     putExtra("sms_body", message)
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
-                "Opening messaging for $contact, sir. Your message is ready to send."
+                "Opening messages for ${contactMatch.name}, sir. Your message is ready to send."
             } catch (e: Exception) {
-                "I'm afraid I encountered an issue opening the messaging app, sir. ${e.message}"
+                "I'm afraid I encountered an issue opening the messaging app, sir: ${e.message}"
             }
         } else {
-            // Fallback: open messaging with just the name
+            // Fallback: open messaging with just the draft message
             try {
-                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                    data = android.net.Uri.parse("sms:")
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    data = Uri.parse("sms:")
                     putExtra("sms_body", message)
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
-                "I couldn't find $contact in your contacts, sir, but I've opened the messaging app with your message."
+                "I couldn't locate $contact in your contacts, sir, but I've opened messaging with your message."
             } catch (e: Exception) {
-                "I'm terribly sorry, sir. I was unable to open messaging. ${e.message}"
+                "I'm terribly sorry, sir. I was unable to open messaging: ${e.message}"
             }
         }
     }

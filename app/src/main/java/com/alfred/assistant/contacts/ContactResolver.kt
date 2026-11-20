@@ -2,34 +2,103 @@ package com.alfred.assistant.contacts
 
 import android.content.Context
 import android.provider.ContactsContract
+import android.telephony.TelephonyManager
 import android.util.Log
+import java.util.Locale
 
 /**
- * Resolves a contact name to a phone number by querying the device's contacts
- * via [ContactsContract].
+ * Resolves contact names to phone numbers and structured contact details.
+ * Performs intelligent token and fuzzy matching against the device's contacts.
  */
 object ContactResolver {
 
     private const val TAG = "AlfredContacts"
 
+    data class ContactMatch(
+        val name: String,
+        val phoneNumber: String,
+        val formattedWhatsAppNumber: String
+    )
+
     /**
-     * Looks up a phone number for the given [name] from the device contacts.
-     *
-     * Performs a case-insensitive LIKE query on [ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME]
-     * using the pattern `%name%`.
-     *
-     * @param context The Android context for content resolver access.
-     * @param name The contact name to search for (partial match supported).
-     * @return The first matching phone number, or `null` if no match is found.
+     * Resolves a contact name to a phone number. Backward compatible.
      */
     fun resolve(context: Context, name: String): String? {
-        if (name.isBlank()) {
-            Log.w(TAG, "Contact name is blank, cannot resolve")
+        return resolveContact(context, name)?.phoneNumber
+    }
+
+    /**
+     * Finds the best matching contact from the device's contacts list.
+     */
+    fun resolveContact(context: Context, name: String): ContactMatch? {
+        val query = name.trim().lowercase()
+        if (query.isBlank()) {
+            Log.w(TAG, "Contact query is blank")
             return null
         }
 
         return try {
-            queryContact(context, name)
+            val contacts = fetchAllContacts(context)
+            if (contacts.isEmpty()) {
+                Log.w(TAG, "No contacts found on device or permission not granted")
+                return null
+            }
+
+            // Clean search terms (remove punctuation, extraneous symbols)
+            val cleanQuery = query.replace(Regex("[^a-z0-9 ]"), "").trim()
+            val queryTokens = cleanQuery.split("\\s+".toRegex()).filter { it.isNotBlank() }
+
+            // Score and rank all contacts
+            var bestMatch: Pair<String, String>? = null // (name, phoneNumber)
+            var highestScore = -1
+
+            for ((contactName, phoneNumber) in contacts) {
+                val lowerContact = contactName.lowercase().trim()
+                val cleanContact = lowerContact.replace(Regex("[^a-z0-9 ]"), "").trim()
+                val contactTokens = cleanContact.split("\\s+".toRegex()).filter { it.isNotBlank() }
+
+                var score = 0
+
+                // 1. Exact match: 100
+                if (lowerContact == query || cleanContact == cleanQuery) {
+                    score = 100
+                }
+                // 2. Starts with: 90
+                else if (lowerContact.startsWith(query) || cleanContact.startsWith(cleanQuery)) {
+                    score = 90
+                }
+                // 3. Any token matches exactly: 85 (e.g. query "Shriraj" matches "Shriraj Patil")
+                else if (contactTokens.any { it == cleanQuery } || queryTokens.any { token -> contactTokens.contains(token) }) {
+                    score = 85
+                }
+                // 4. Any contact token starts with query token: 75
+                else if (queryTokens.any { qTok -> contactTokens.any { cTok -> cTok.startsWith(qTok) } }) {
+                    score = 75
+                }
+                // 5. Contains substring: 60
+                else if (cleanContact.contains(cleanQuery) || cleanQuery.contains(cleanContact)) {
+                    score = 60
+                }
+
+                if (score > highestScore) {
+                    highestScore = score
+                    bestMatch = Pair(contactName, phoneNumber)
+                }
+            }
+
+            if (bestMatch != null && highestScore >= 60) {
+                val (matchedName, rawNumber) = bestMatch
+                val formattedNumber = formatForWhatsApp(context, rawNumber)
+                Log.d(TAG, "Matched '$name' -> '$matchedName' ($formattedNumber), score=$highestScore")
+                ContactMatch(
+                    name = matchedName,
+                    phoneNumber = rawNumber,
+                    formattedWhatsAppNumber = formattedNumber
+                )
+            } else {
+                Log.d(TAG, "No suitable contact match for: '$name' (highest score: $highestScore)")
+                null
+            }
         } catch (e: SecurityException) {
             Log.e(TAG, "Missing READ_CONTACTS permission", e)
             null
@@ -40,51 +109,93 @@ object ContactResolver {
     }
 
     /**
-     * Queries the contacts database for a phone number matching the given [name].
+     * Reads all contacts with phone numbers.
      */
-    private fun queryContact(context: Context, name: String): String? {
+    private fun fetchAllContacts(context: Context): List<Pair<String, String>> {
+        val list = mutableListOf<Pair<String, String>>()
         val uri = ContactsContract.CommonDataKinds.Phone.CONTENT_URI
-
         val projection = arrayOf(
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
             ContactsContract.CommonDataKinds.Phone.NUMBER
         )
 
-        // Case-insensitive LIKE search
-        val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
-        val selectionArgs = arrayOf("%$name%")
-
-        // Sort by display name for consistent results
-        val sortOrder = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
-
         val cursor = context.contentResolver.query(
             uri,
             projection,
-            selection,
-            selectionArgs,
-            sortOrder
+            null,
+            null,
+            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
         )
 
         cursor?.use {
-            if (it.moveToFirst()) {
-                val nameIndex = it.getColumnIndex(
-                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME
-                )
-                val numberIndex = it.getColumnIndex(
-                    ContactsContract.CommonDataKinds.Phone.NUMBER
-                )
+            val nameIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numIdx = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
 
-                if (numberIndex >= 0) {
-                    val matchedName = if (nameIndex >= 0) it.getString(nameIndex) else "Unknown"
-                    val phoneNumber = it.getString(numberIndex)
-
-                    Log.d(TAG, "Found contact: $matchedName -> $phoneNumber")
-                    return phoneNumber
+            while (it.moveToNext()) {
+                val name = if (nameIdx >= 0) it.getString(nameIdx) ?: "" else ""
+                val num = if (numIdx >= 0) it.getString(numIdx) ?: "" else ""
+                if (name.isNotBlank() && num.isNotBlank()) {
+                    list.add(Pair(name, num))
                 }
             }
         }
+        return list
+    }
 
-        Log.d(TAG, "No contact found matching: $name")
-        return null
+    /**
+     * Cleans and formats phone number for WhatsApp deep link (api.whatsapp.com/send?phone=NUMBER).
+     * WhatsApp requires international format digits with NO leading '+' or dashes or spaces.
+     */
+    fun formatForWhatsApp(context: Context, rawNumber: String): String {
+        // Keep only digits and '+'
+        val cleaned = rawNumber.trim().replace(Regex("[^0-9+]"), "")
+
+        // If it starts with '+', remove '+'
+        if (cleaned.startsWith("+")) {
+            return cleaned.removePrefix("+")
+        }
+
+        // If starts with 00 (international call prefix), remove 00
+        if (cleaned.startsWith("00")) {
+            return cleaned.removePrefix("00")
+        }
+
+        // Detect default country calling code
+        val countryCode = detectDefaultCountryCode(context)
+
+        // If starts with single 0 and length is 11 (common local dial pattern e.g. 09876543210)
+        if (cleaned.startsWith("0") && cleaned.length == 11) {
+            return countryCode + cleaned.substring(1)
+        }
+
+        // Standard 10 digit mobile number without country code
+        if (cleaned.length == 10) {
+            return countryCode + cleaned
+        }
+
+        return cleaned
+    }
+
+    private fun detectDefaultCountryCode(context: Context): String {
+        return try {
+            val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+            val simCountry = tm?.simCountryIso?.uppercase(Locale.ROOT)
+            val netCountry = tm?.networkCountryIso?.uppercase(Locale.ROOT)
+            val deviceCountry = simCountry?.ifBlank { null }
+                ?: netCountry?.ifBlank { null }
+                ?: Locale.getDefault().country.uppercase(Locale.ROOT)
+
+            when (deviceCountry) {
+                "IN" -> "91"
+                "US", "CA" -> "1"
+                "GB", "UK" -> "44"
+                "AU" -> "61"
+                "DE" -> "49"
+                "FR" -> "33"
+                else -> "91"
+            }
+        } catch (_: Exception) {
+            "91"
+        }
     }
 }
