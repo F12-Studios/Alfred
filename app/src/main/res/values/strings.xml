@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Alfred</string>
+
+    <!-- Notification Channels -->
+    <string name="notification_channel_service_name">Alfred Listening Service</string>
+    <string name="notification_channel_service_description">Keeps Alfred listening for your wake word in the background.</string>
+    <string name="notification_channel_alerts_name">Alfred Alerts</string>
+    <string name="notification_channel_alerts_description">Notifications for command results and important alerts.</string>
+
+    <!-- Foreground Service Notification -->
+    <string name="notification_service_title">Alfred is listening</string>
+    <string name="notification_service_text">Say \"Hey Alfred\" followed by a command.</string>
+    <string name="notification_action_stop">Stop Listening</string>
+
+    <!-- UI Text -->
+    <string name="btn_start_listening">Activate Alfred</string>
+    <string name="btn_stop_listening">Deactivate Alfred</string>
+    <string name="status_listening">Listening for \"Hey Alfred\"…</string>
+    <string name="status_idle">Alfred is standing by.</string>
+    <string name="status_processing">Processing your command, sir…</string>
+
+    <!-- TTS Responses (British butler personality) -->
+    <string name="tts_greeting">Good day, sir. Alfred at your service.</string>
+    <string name="tts_command_not_recognized">I beg your pardon, sir. I didn\'t quite catch that.</string>
+    <string name="tts_calling">Right away, sir. Placing a call to %1$s.</string>
+    <string name="tts_opening_app">Certainly, sir. Opening %1$s for you.</string>
+    <string name="tts_searching">Very well, sir. Searching for %1$s.</string>
+    <string name="tts_selfie">Of course, sir. Preparing the camera for your portrait.</string>
+    <string name="tts_message">At once, sir. Opening messages for %1$s.</string>
+    <string name="tts_music">Splendid choice, sir. Starting the music.</string>
+    <string name="tts_alarm_set">Consider it done, sir. Alarm set for %1$s.</string>
+    <string name="tts_flashlight_on">Illumination activated, sir.</string>
+    <string name="tts_flashlight_off">Flashlight extinguished, sir.</string>
+    <string name="tts_battery">Your device is currently at %1$d percent battery, sir.</string>
+    <string name="tts_contact_not_found">My apologies, sir. I could not locate a contact named %1$s.</string>
+    <string name="tts_app_not_found">I\'m afraid %1$s does not appear to be installed, sir.</string>
+
+    <!-- Permissions -->
+    <string name="permission_rationale_audio">Alfred requires microphone access to listen for your commands.</string>
+    <string name="permission_rationale_contacts">Alfred needs contact access to place calls on your behalf.</string>
+    <string name="permission_rationale_camera">Alfred requires camera access to take selfies for you.</string>
+    <string name="permission_rationale_phone">Alfred needs phone permission to place calls.</string>
+    <string name="permission_rationale_notifications">Alfred needs notification permission to run in the background.</string>
+</resources>

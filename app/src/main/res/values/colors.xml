@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark Theme Palette -->
+    <color name="dark_background">#FF0D1117</color>
+    <color name="dark_surface">#FF161B22</color>
+    <color name="dark_surface_variant">#FF21262D</color>
+
+    <!-- Accent: Gold -->
+    <color name="gold_primary">#FFFFB800</color>
+    <color name="gold_primary_variant">#FFFFC233</color>
+    <color name="gold_on_primary">#FF0D1117</color>
+
+    <!-- Accent: Blue -->
+    <color name="blue_accent">#FF58A6FF</color>
+    <color name="blue_accent_variant">#FF79C0FF</color>
+    <color name="blue_on_accent">#FF0D1117</color>
+
+    <!-- Text -->
+    <color name="text_primary">#FFF0F6FC</color>
+    <color name="text_secondary">#FF8B949E</color>
+    <color name="text_disabled">#FF484F58</color>
+
+    <!-- Status -->
+    <color name="status_success">#FF3FB950</color>
+    <color name="status_error">#FFF85149</color>
+    <color name="status_warning">#FFD29922</color>
+
+    <!-- Misc -->
+    <color name="ripple">#33FFFFFF</color>
+    <color name="divider">#FF30363D</color>
+</resources>
