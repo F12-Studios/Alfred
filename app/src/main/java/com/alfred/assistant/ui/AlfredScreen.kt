@@ -15,27 +15,42 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -49,9 +64,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.alfred.assistant.commands.AiAssistantHandler
 import com.alfred.assistant.service.AlfredService
 
 @Composable
@@ -61,11 +79,22 @@ fun AlfredScreen(
 ) {
     val context = LocalContext.current
     val goldColor = Color(0xFFFFB800)
+    val prefs = remember { context.getSharedPreferences("alfred_prefs", Context.MODE_PRIVATE) }
 
     var isServiceRunning by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("Alfred is ready") }
     var lastCommand by remember { mutableStateOf<String?>(null) }
     var lastResponse by remember { mutableStateOf<String?>(null) }
+
+    // AI Settings State
+    var hasGeminiKey by remember {
+        mutableStateOf(!prefs.getString(AiAssistantHandler.PREF_GEMINI_API_KEY, null).isNullOrBlank())
+    }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var inputApiKey by remember {
+        mutableStateOf(prefs.getString(AiAssistantHandler.PREF_GEMINI_API_KEY, "") ?: "")
+    }
+    var showKeyText by remember { mutableStateOf(false) }
 
     // Listen for broadcast status updates from AlfredService
     DisposableEffect(Unit) {
@@ -118,7 +147,7 @@ fun AlfredScreen(
     // Animate status text color
     val statusColor by animateColorAsState(
         targetValue = when (statusText) {
-            "Listening..." -> goldColor
+            "Listening...", "Listening for command..." -> goldColor
             "Processing..." -> Color(0xFF58A6FF)
             else -> MaterialTheme.colorScheme.onBackground
         },
@@ -147,9 +176,7 @@ fun AlfredScreen(
                 },
                 containerColor = goldColor,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                elevation = FloatingActionButtonDefaults.elevation(
-                    defaultElevation = 8.dp
-                )
+                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp)
             ) {
                 Icon(
                     imageVector = if (isServiceRunning) Icons.Filled.Mic else Icons.Filled.MicOff,
@@ -163,9 +190,71 @@ fun AlfredScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Top Bar with AI settings
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "ALFRED",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = goldColor,
+                        letterSpacing = 2.sp
+                    )
+                    // AI Status Pill
+                    Row(
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .background(
+                                color = if (hasGeminiKey) Color(0x263FB950) else Color(0x26FFB800),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (hasGeminiKey) Color(0xFF3FB950) else goldColor.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .clickable { showSettingsDialog = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AutoAwesome,
+                            contentDescription = "AI Mode",
+                            tint = if (hasGeminiKey) Color(0xFF3FB950) else goldColor,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (hasGeminiKey) "Gemini AI Active" else "AI Settings ⚙️",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (hasGeminiKey) Color(0xFF3FB950) else goldColor
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = { showSettingsDialog = true },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(MaterialTheme.colorScheme.surface, CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "AI Settings",
+                        tint = goldColor
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.weight(1f))
 
             // Monogram with pulsing ring
@@ -212,10 +301,11 @@ fun AlfredScreen(
                 text = statusText,
                 style = MaterialTheme.typography.headlineSmall,
                 color = statusColor,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Last command/response card
             if (lastCommand != null || lastResponse != null) {
@@ -232,7 +322,7 @@ fun AlfredScreen(
                     ) {
                         if (lastCommand != null) {
                             Text(
-                                text = "You said:",
+                                text = "You asked:",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                             )
@@ -268,7 +358,7 @@ fun AlfredScreen(
 
             // Bottom hint text
             Text(
-                text = "Say \"Hey Alfred\" followed by a command",
+                text = "Say \"Hey Alfred\" followed by any command or question",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
                 textAlign = TextAlign.Center
@@ -276,5 +366,95 @@ fun AlfredScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+    // AI Settings Dialog
+    if (showSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showSettingsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        tint = goldColor
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = "Alfred AI Intelligence")
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "To enable full conversational answers on any topic (like Gemini or Siri), enter your Google Gemini API key below.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Tip: You can generate a 100% free key at aistudio.google.com",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = goldColor
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = inputApiKey,
+                        onValueChange = { inputApiKey = it },
+                        label = { Text("Gemini API Key") },
+                        placeholder = { Text("AIzaSy...") },
+                        singleLine = true,
+                        visualTransformation = if (showKeyText) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showKeyText = !showKeyText }) {
+                                Icon(
+                                    imageVector = if (showKeyText) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                    contentDescription = "Toggle visibility",
+                                    tint = goldColor
+                                )
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = goldColor,
+                            focusedLabelColor = goldColor,
+                            cursorColor = goldColor
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val cleanKey = inputApiKey.trim()
+                        prefs.edit().putString(AiAssistantHandler.PREF_GEMINI_API_KEY, cleanKey).apply()
+                        hasGeminiKey = cleanKey.isNotEmpty()
+                        showSettingsDialog = false
+                    }
+                ) {
+                    Text("Save", color = goldColor, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                Row {
+                    if (hasGeminiKey) {
+                        TextButton(
+                            onClick = {
+                                prefs.edit().remove(AiAssistantHandler.PREF_GEMINI_API_KEY).apply()
+                                inputApiKey = ""
+                                hasGeminiKey = false
+                                showSettingsDialog = false
+                            }
+                        ) {
+                            Text("Remove Key", color = Color(0xFFF85149))
+                        }
+                    }
+                    TextButton(onClick = { showSettingsDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
     }
 }

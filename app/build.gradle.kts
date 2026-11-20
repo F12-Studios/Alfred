@@ -94,6 +94,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("com.google.android.material:material:1.11.0")
 
+    // Networking (for AI / Gemini / Knowledge API)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // CameraX
     val cameraxVersion = "1.3.1"
     implementation("androidx.camera:camera-core:$cameraxVersion")

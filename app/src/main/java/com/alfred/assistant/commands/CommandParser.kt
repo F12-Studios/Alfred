@@ -29,17 +29,14 @@ object CommandParser {
             // --- Open app ---
             matchesOpenApp(input) -> parseOpenApp(input)
 
-            // --- Web search ---
-            matchesWebSearch(input) -> parseWebSearch(input)
+            // --- Flashlight ---
+            matchesFlashlight(input) -> parseFlashlight(input)
 
             // --- Play music ---
             matchesPlayMusic(input) -> ParsedCommand.PlayMusic
 
             // --- Set alarm ---
             matchesSetAlarm(input) -> parseSetAlarm(input)
-
-            // --- Flashlight ---
-            matchesFlashlight(input) -> parseFlashlight(input)
 
             // --- Check time ---
             matchesCheckTime(input) -> ParsedCommand.CheckTime
@@ -50,8 +47,11 @@ object CommandParser {
             // --- Battery status ---
             matchesBatteryStatus(input) -> ParsedCommand.BatteryStatus
 
-            // --- Unknown ---
-            else -> ParsedCommand.Unknown(text)
+            // --- Explicit Web search (e.g., "search the web for...") ---
+            matchesExplicitWebSearch(input) -> parseWebSearch(input)
+
+            // --- AI Question / Conversational Assistant (Gemini / Siri style) ---
+            else -> ParsedCommand.AskAi(text)
         }
     }
 
@@ -185,21 +185,20 @@ object CommandParser {
         return ParsedCommand.OpenApp(input.substringAfter(" ").trim())
     }
 
-    // ── Web search ──────────────────────────────────────────────────────────
+    // ── Web search (explicit) ───────────────────────────────────────────────
 
-    private fun matchesWebSearch(input: String): Boolean {
+    private fun matchesExplicitWebSearch(input: String): Boolean {
         val prefixes = listOf(
-            "search for ", "search ", "google ", "look up ", "look for ",
-            "find ", "web search ", "search the web for "
+            "search the web for ", "search the web ", "web search ",
+            "open browser and search ", "browse the web for "
         )
         return prefixes.any { input.startsWith(it) }
     }
 
     private fun parseWebSearch(input: String): ParsedCommand {
         val prefixes = listOf(
-            "search the web for ", "web search ",
-            "search for ", "search ", "google ",
-            "look up ", "look for ", "find "
+            "search the web for ", "search the web ", "web search ",
+            "open browser and search ", "browse the web for "
         )
         for (prefix in prefixes) {
             if (input.startsWith(prefix)) {
@@ -354,6 +353,9 @@ sealed class ParsedCommand {
 
     /** Check the battery level. */
     data object BatteryStatus : ParsedCommand()
+
+    /** Ask general knowledge or conversational question to AI (like Gemini / Siri). */
+    data class AskAi(val question: String) : ParsedCommand()
 
     /** Unrecognized command. */
     data class Unknown(val rawText: String) : ParsedCommand()

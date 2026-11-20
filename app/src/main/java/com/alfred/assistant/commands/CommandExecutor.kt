@@ -62,9 +62,12 @@ object CommandExecutor {
                 DeviceHandler.getBatteryStatus(context)
             }
 
+            is ParsedCommand.AskAi -> {
+                AiAssistantHandler.answerQuestion(context, command.question)
+            }
+
             is ParsedCommand.Unknown -> {
-                "I'm terribly sorry, sir, but I didn't quite catch that. " +
-                        "You said: \"${command.rawText}\". Perhaps you could rephrase?"
+                AiAssistantHandler.answerQuestion(context, command.rawText)
             }
         }
     }
