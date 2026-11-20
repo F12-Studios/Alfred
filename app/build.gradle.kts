@@ -90,8 +90,9 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    // Core KTX
+    // Core KTX & Material
     implementation("androidx.core:core-ktx:1.12.0")
+    implementation("com.google.android.material:material:1.11.0")
 
     // CameraX
     val cameraxVersion = "1.3.1"
