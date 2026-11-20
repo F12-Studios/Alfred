@@ -18,7 +18,7 @@ import com.alfred.assistant.R
 import com.alfred.assistant.commands.CommandExecutor
 import com.alfred.assistant.commands.CommandParser
 import com.alfred.assistant.commands.ParsedCommand
-import com.alfred.assistant.speech.AlfredSpeaker
+import com.alfred.assistant.tts.AlfredSpeaker
 import com.alfred.assistant.speech.CommandRecognizer
 import com.alfred.assistant.speech.WakeWordDetector
 import kotlinx.coroutines.CoroutineScope
