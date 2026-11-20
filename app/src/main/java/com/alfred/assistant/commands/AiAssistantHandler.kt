@@ -133,9 +133,9 @@ object AiAssistantHandler {
 
                 var parsedResult: String? = null
                 val response = httpClient.newCall(request).execute()
-                response.use { resp ->
-                    if (resp.isSuccessful) {
-                        val bodyString = resp.body?.string()
+                try {
+                    if (response.isSuccessful) {
+                        val bodyString = response.body?.string()
                         if (!bodyString.isNullOrBlank()) {
                             val json = JSONObject(bodyString)
                             val candidates = json.optJSONArray("candidates")
@@ -152,8 +152,10 @@ object AiAssistantHandler {
                             }
                         }
                     } else {
-                        Log.w(TAG, "Gemini call to $model failed with code ${resp.code}: ${resp.message}")
+                        Log.w(TAG, "Gemini call to $model failed with code ${response.code}: ${response.message}")
                     }
+                } finally {
+                    response.close()
                 }
 
                 if (parsedResult != null) {
@@ -183,9 +185,9 @@ object AiAssistantHandler {
 
             var resultText: String? = null
             val response = httpClient.newCall(request).execute()
-            response.use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string()
+            try {
+                if (response.isSuccessful) {
+                    val body = response.body?.string()
                     if (!body.isNullOrBlank()) {
                         val json = JSONObject(body)
                         val extract = json.optString("extract")
@@ -194,6 +196,8 @@ object AiAssistantHandler {
                         }
                     }
                 }
+            } finally {
+                response.close()
             }
             resultText
         } catch (e: Exception) {
@@ -218,9 +222,9 @@ object AiAssistantHandler {
 
             var resultText: String? = null
             val response = httpClient.newCall(request).execute()
-            response.use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string()
+            try {
+                if (response.isSuccessful) {
+                    val body = response.body?.string()
                     if (!body.isNullOrBlank()) {
                         val json = JSONObject(body)
                         val abstractText = json.optString("AbstractText")
@@ -234,6 +238,8 @@ object AiAssistantHandler {
                         }
                     }
                 }
+            } finally {
+                response.close()
             }
             resultText
         } catch (e: Exception) {
